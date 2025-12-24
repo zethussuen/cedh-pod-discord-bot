@@ -1,0 +1,37 @@
+{
+  "name": "cedh-pod-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for generating cEDH pods with meta-weighted commanders",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "worker:dev": "wrangler dev src/worker.ts",
+    "worker:deploy": "wrangler deploy",
+    "register": "node dist/register.js"
+  },
+  "keywords": [
+    "discord",
+    "cedh",
+    "mtg",
+    "commander"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@cf-wasm/photon": "^0.3.4",
+    "discord-interactions": "^4.4.0",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251223.0",
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.47.0"
+  }
+}

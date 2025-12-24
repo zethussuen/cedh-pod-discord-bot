@@ -1,0 +1,21 @@
+name = "cedh-pod-bot"
+main = "src/worker.ts"
+compatibility_date = "2024-11-16"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# These will be set via secrets in production
+# DISCORD_PUBLIC_KEY will be set as a secret
+# DISCORD_APPLICATION_ID will be set as a secret
+# MOXFIELD_API_KEY will be set as a secret
+
+[[kv_namespaces]]
+binding = "DECK_CACHE"
+id = "4ef032ab72e54fa58020625fb3d6d7e9"
+
+[observability]
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
