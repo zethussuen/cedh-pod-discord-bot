@@ -7,3 +7,6 @@ node_modules/
 # TypeScript build output
 dist/
 *.tsbuildinfo
+
+# local specs
+product-specs/

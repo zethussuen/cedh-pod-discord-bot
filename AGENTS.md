@@ -34,7 +34,7 @@ npm run dev          # Start with auto-reload (Node.js --watch)
 
 - **EDHTop16** - Commander meta shares based on last 3 months of tournament data
 - **metaDecks array** - Located in `src/utils/metaDecks.js`
-- **Last Updated** - 2025-11-08 (update monthly)
+- **Last Updated** - 2025-12-22 (update monthly)
 
 ## File Structure
 
