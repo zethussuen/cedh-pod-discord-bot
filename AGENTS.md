@@ -4,246 +4,257 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Discord bot for generating competitive EDH (cEDH) pods with meta-weighted commander selection. It helps players organize casual games by creating balanced 2-4 player pods based on real tournament data from EDHTop16.
+This is a Discord bot for generating competitive EDH (cEDH) pods with meta-weighted commander selection. It helps players organize casual games by creating balanced 4-player pods based on real tournament data from EDHTop16. The bot also supports deck management and mulligan stat tracking.
 
 ## Development Commands
 
 ```bash
-npm install          # Install dependencies
-npm start            # Start the bot
-npm run dev          # Start with auto-reload (Node.js --watch)
+npm install              # Install dependencies
+npm run build            # Compile TypeScript
+npm run typecheck        # Type check without emitting
+npm run worker:dev       # Run locally with Wrangler
+npm run worker:deploy    # Deploy to Cloudflare Workers
+node dist/register.js    # Register slash commands with Discord
 ```
 
 ## Architecture
 
-### Bot Framework
+### Deployment
 
-- **discord.js v14** - Discord API library
+- **Cloudflare Workers** - Serverless deployment via Wrangler
+- **Cloudflare D1** - SQLite database for deck management and stat tracking
+- **Cloudflare KV** - Caching for Moxfield API responses
+
+### Tech Stack
+
+- **TypeScript** - Type-safe development
 - **ES Modules** - Using `"type": "module"` in package.json
-- **Slash Commands** - Modern Discord command interface
-- **Button Interactions** - For regenerating pods
+- **Discord Interactions API** - HTTP-based interactions (not WebSocket gateway)
+- **Photon WASM** - Image composition for card hands
 
-### Core Logic
+### Core Features
 
-- **Weighted Random Selection** - Commanders selected based on `metaShare` percentages
-- **Pod Generation** - Creates 2-4 player pods with one "You" seat and opponents
-- **Fisher-Yates Shuffle** - Fair randomization of seat positions
-- **In-Memory State** - Pod state stored in Map for button interactions (temporary)
-
-### Data Sources
-
-- **EDHTop16** - Commander meta shares based on last 3 months of tournament data
-- **metaDecks array** - Located in `src/utils/metaDecks.js`
-- **Last Updated** - 2025-12-22 (update monthly)
+- **Pod Generation** - Creates 4-player pods with meta-weighted commanders
+- **Deck Management** - Save, list, and manage Moxfield deck URLs
+- **Mulligan Tracking** - Track keep/mulligan decisions and calculate stats
+- **Card Hand Display** - Composite card images from Scryfall
 
 ## File Structure
 
 ```
 cedh-pod-bot/
 ├── package.json
-├── .env                      # Bot token (not committed)
-├── .env.example              # Template for environment variables
+├── wrangler.toml               # Cloudflare Workers config
+├── .env                        # Local secrets (not committed)
+├── .env.example                # Template for environment variables
 ├── src/
-│   ├── index.js              # Main bot entry point, event handlers
-│   ├── config.js             # Environment configuration
-│   ├── utils/
-│   │   ├── metaDecks.js      # Commander meta data (from EDHTop16)
-│   │   └── podGenerator.js   # Core pod generation logic
-│   └── commands/
-│       └── pod.js            # /pod slash command implementation
+│   ├── worker.ts               # Main Cloudflare Worker entry point
+│   ├── register.ts             # Discord command registration script
+│   ├── config.ts               # Environment configuration
+│   ├── db/
+│   │   └── schema.sql          # D1 database schema
+│   ├── services/
+│   │   ├── deckService.ts      # Deck CRUD operations
+│   │   └── sessionService.ts   # Mulligan session tracking
+│   ├── handlers/
+│   │   ├── help.ts             # /pod help command
+│   │   └── deck/
+│   │       ├── create.ts       # /pod deck create
+│   │       ├── list.ts         # /pod deck list
+│   │       ├── use.ts          # /pod deck use
+│   │       ├── delete.ts       # /pod deck delete
+│   │       ├── rename.ts       # /pod deck rename
+│   │       ├── stats.ts        # /pod deck stats
+│   │       ├── setList.ts      # /pod deck set-list
+│   │       └── autocomplete.ts # Deck name autocomplete
+│   └── utils/
+│       ├── metaDecks.ts        # Commander meta data (from EDHTop16)
+│       ├── podGenerator.ts     # Core pod generation logic
+│       ├── moxfield.ts         # Moxfield API client
+│       ├── scryfall.ts         # Scryfall API client
+│       ├── imageCompositor.ts  # Card image composition
+│       └── stats.ts            # Mean/median/mode calculations
+```
+
+## Database Schema (D1)
+
+### decks table
+```sql
+CREATE TABLE decks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,          -- Discord user ID
+  name TEXT NOT NULL,             -- User-assigned deck name
+  moxfield_deck_id TEXT NOT NULL, -- Extracted Moxfield deck ID
+  moxfield_url TEXT NOT NULL,     -- Full Moxfield URL
+  is_current INTEGER DEFAULT 0,   -- 1 if this is user's current deck
+  created_at INTEGER,
+  updated_at INTEGER
+);
+```
+
+### mulligan_sessions table
+```sql
+CREATE TABLE mulligan_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL UNIQUE, -- UUID stored in button custom_id
+  user_id TEXT NOT NULL,
+  deck_id INTEGER NOT NULL,
+  mulligan_count INTEGER DEFAULT 0,
+  resolved INTEGER DEFAULT 0,      -- 1 when user clicks Keep
+  created_at INTEGER,
+  resolved_at INTEGER,
+  FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
+```
+
+## Command Reference
+
+### `/pod generate [decklist]`
+Generate a 4-player cEDH pod with meta-weighted commanders
+
+**Options:**
+- `decklist` (optional): Moxfield URL, saved deck name, or omit to use current deck
+
+**Output:**
+- Pod embed with 4 commanders
+- Card hand image (if deck provided)
+- Keep/Mulligan buttons (ephemeral)
+- Voting reactions (👍/❌)
+
+### `/pod deck create <name> <url>`
+Register a new deck with a Moxfield URL
+
+### `/pod deck list`
+Show all your registered decks
+
+### `/pod deck use <name>`
+Set a deck as your current/default deck
+
+### `/pod deck delete <name>`
+Delete a registered deck
+
+### `/pod deck rename <name> <new_name>`
+Rename a deck
+
+### `/pod deck set-list <name> <url>`
+Update a deck's Moxfield URL
+
+### `/pod deck stats [name]`
+View mulligan stats (mean/median/mode) for a deck
+
+### `/pod deck stats-reset <name>`
+Reset mulligan stats for a deck
+
+### `/pod help`
+Show all available commands
+
+## Session Tracking Flow
+
+1. User runs `/pod generate MyDeck` with a saved deck
+2. Worker creates `mulligan_session` row with `mulligan_count=0`
+3. Session UUID stored in button `custom_id`
+4. Each Mulligan click increments `mulligan_count` in D1
+5. Keep click sets `resolved=1` - session now counts toward stats
+6. Stats calculated from resolved sessions only
+
+## Environment Variables
+
+```env
+DISCORD_BOT_TOKEN=your_bot_token_here
+DISCORD_CLIENT_ID=your_client_id_here
+DISCORD_PUBLIC_KEY=your_public_key_here
+MOXFIELD_API_KEY=optional_api_key
+```
+
+## Wrangler Configuration
+
+```toml
+[[kv_namespaces]]
+binding = "DECK_CACHE"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cedh-pod-db"
+
+[triggers]
+crons = ["0 0 * * *"]  # Daily cleanup of stale sessions
 ```
 
 ## Key Functions
 
 ### `generatePod(playerCount, lockedSeats)`
-Located in `src/utils/podGenerator.js`
+Located in `src/utils/podGenerator.ts`
 
 Generates a pod with:
 - `playerCount` (2-4): Number of players
 - `lockedSeats` (array): Seats to preserve during regeneration
-- Returns: Array of seat objects with position, commander, colors, isUser flag
+- Returns: Array of seat objects with commander and isUser flag
 
-### `getWeightedRandomMetaDeck()`
-Located in `src/utils/podGenerator.js`
+### `resolveDeck(userId, input, db)`
+Located in `src/worker.ts`
 
-- Uses cumulative weight distribution
-- Generates random number 0-100
-- Selects commander based on meta share percentages
-- Returns: Deck object with commanders, colors, metaShare
+Resolves deck input to Moxfield deck ID:
+- No input → use current deck from D1
+- Moxfield URL → extract deck ID directly
+- Deck name → lookup in D1
 
-### `createPodEmbed(pod)`
-Located in `src/commands/pod.js`
+### `DeckService`
+Located in `src/services/deckService.ts`
 
-- Creates Discord embed with formatted pod display
-- Shows seat numbers, player/opponent labels
-- Displays commander names and color identity
-- Returns: EmbedBuilder object
+CRUD operations for user decks:
+- `create()`, `list()`, `getByName()`, `getCurrent()`
+- `setCurrent()`, `delete()`, `rename()`, `updateUrl()`
+- `searchByPrefix()` for autocomplete
 
-## Discord Bot Setup
+### `SessionService`
+Located in `src/services/sessionService.ts`
 
-### Required Permissions
-- Send Messages
-- Embed Links
-- Use Application Commands
+Mulligan session tracking:
+- `create()` - New session on pod generation
+- `incrementMulligan()` - Called on mulligan button click
+- `resolve()` - Called on keep button click
+- `getStats()` - Calculate mean/median/mode
+- `cleanupOldSessions()` - Cron job cleanup
 
-### Environment Variables
+## Data Sources
 
-```env
-DISCORD_BOT_TOKEN=your_bot_token_here
-DISCORD_CLIENT_ID=your_client_id_here
+- **EDHTop16** - Commander meta shares based on tournament data
+- **metaDecks array** - Located in `src/utils/metaDecks.ts`
+- **Moxfield API** - Deck data and card lists
+- **Scryfall API** - Card images
+
+## Deployment
+
+### Initial Setup
+```bash
+# Create D1 database
+npx wrangler d1 create cedh-pod-db
+
+# Apply schema
+npx wrangler d1 execute cedh-pod-db --remote --file=./src/db/schema.sql
+
+# Set secrets
+npx wrangler secret put DISCORD_PUBLIC_KEY
+npx wrangler secret put DISCORD_BOT_TOKEN
+npx wrangler secret put DISCORD_APPLICATION_ID
+
+# Deploy
+npm run worker:deploy
+
+# Register commands
+npm run build && node dist/register.js
 ```
 
-### Bot Intents
-Only requires `GatewayIntentBits.Guilds` - no message content or members needed
-
-## Command Reference
-
-### `/pod`
-Generate a cEDH pod with meta-weighted commanders
-
-**Options:**
-- `players` (integer, optional): Number of players (2-4), defaults to 4
-
-**Output:**
-- Discord embed with seat assignments
-- Color identity emojis for each commander
-- "You" designation for player seat
-- Regenerate button for new randomization
-
-## State Management
-
-### Current Implementation (v1)
-- In-memory `Map` stores pod state
-- Key format: `${userId}-${timestamp}`
-- Enables regenerate button functionality
-- State expires when bot restarts
-
-### Future Enhancements
-- Redis/database for persistent state
-- Lock/unlock individual seats
-- Multi-message pod tracking
-- Expiration cleanup after 1 hour
-
-## Color Identity System
-
-### Color Codes
-- `W` - White ⚪
-- `U` - Blue 🔵
-- `B` - Black ⚫
-- `R` - Red 🔴
-- `G` - Green 🟢
-
-### Display Format
-- Array of color codes: `["B", "R", "U"]`
-- Converted to emoji string: "⚫🔴🔵"
-- Colorless (empty array): "⚪ Colorless"
-
-## Meta Data Updates
-
-**Update Frequency:** Monthly (approximately every 30 days)
-**Last Updated:** 2025-11-08
-
-### Update Process
-
-1. Get updated meta data from the main web app repository
-2. Update `src/utils/metaDecks.js` with new commander list
-3. Ensure meta shares sum to 100%
-4. Update "Last Updated" date in this file and in code comments
-
-### Data Structure
-
-```javascript
-{
-  commanders: ["Commander Name"],           // Array for partners
-  metaShare: 14.48,                        // Percentage (0-100)
-  colors: ["B", "R", "U", "W"],           // Color identity codes
-}
+### Update Deployment
+```bash
+npm run worker:deploy
 ```
-
-## Error Handling
-
-- Command execution errors reply with ephemeral error messages
-- Button interaction errors show user-friendly messages
-- Expired pod state shows "Use `/pod` to generate a new one"
-- Invalid player counts constrained by slash command options (2-4)
-
-## Deployment Notes
-
-### Hosting Requirements
-- Node.js 18+ runtime
-- 24/7 uptime for persistent WebSocket connection
-- Minimal resources (< 100MB RAM for small servers)
-
-### Recommended Platforms
-- Railway.app (easy deployment)
-- Fly.io (free tier available)
-- DigitalOcean App Platform
-- Any VPS with Node.js
-
-### Environment Setup
-1. Set `DISCORD_BOT_TOKEN` and `DISCORD_CLIENT_ID` in hosting platform
-2. Commands register globally on bot startup
-3. No database required for basic functionality
-
-## Future Features
-
-### Planned Enhancements
-- [ ] Lock/unlock individual seats
-- [ ] Persistent state (Redis/database)
-- [ ] Power level filtering (casual/competitive/fringe)
-- [ ] Deck archetype categories (stax/combo/midrange/aggro)
-- [ ] Custom commander pools (e.g., "only 2-color decks")
-- [ ] Save/load pod configurations
-- [ ] Share pod via image export
-
-### Known Limitations
-- State lost on bot restart
-- No seat locking in v1
-- Global command registration (takes ~1 hour to propagate changes)
-- Button interactions expire with pod state
-
-## Development Patterns
-
-### Adding New Commands
-1. Create file in `src/commands/`
-2. Export `data` (SlashCommandBuilder) and `execute` function
-3. Import and register in `src/index.js`
-4. Add to commands collection
-5. Bot auto-registers on startup
-
-### Modifying Meta Data
-- Only edit `src/utils/metaDecks.js`
-- Ensure metaShare values sum to ~100%
-- Follow existing object structure
-- Color codes must be uppercase single letters
-
-### Testing Locally
-1. Create test Discord server
-2. Invite bot with application commands scope
-3. Commands register immediately for development
-4. Use `npm run dev` for auto-reload during development
 
 ## Code Style
 
+- TypeScript with strict mode
 - ES Modules (import/export)
-- Async/await for all Discord interactions
-- Descriptive function names
-- JSDoc comments for public functions
+- Async/await for all async operations
+- `any` type for Discord interaction objects (complex nested structure)
+- Ephemeral messages for user-specific responses
 - Error handling with try/catch blocks
-- Ephemeral replies for error messages
-
-## Synchronization with Web App
-
-This bot shares core logic with the main web application at `cedh-mulligan-trainer`. When making logic changes:
-
-1. **Meta Data** - Copy updates from web app's `app/constants.ts` → `src/utils/metaDecks.js`
-2. **Pod Logic** - Mirror changes to `generatePod()` function
-3. **Color System** - Keep color identity codes consistent
-4. **Meta Share Updates** - Coordinate monthly updates with web app
-
-### Differences from Web App
-- No React/Next.js dependencies
-- Discord embeds instead of UI components
-- Simpler state management (no seat locking yet)
-- No database integration required
-- Different visual representation (emojis vs. mana symbols)

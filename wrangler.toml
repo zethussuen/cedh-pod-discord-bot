@@ -13,6 +13,14 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DECK_CACHE"
 id = "4ef032ab72e54fa58020625fb3d6d7e9"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "cedh-pod-db"
+database_id = "fa6c7b6a-2157-4980-92ba-95369f599265"
+
+[triggers]
+crons = ["0 0 * * *"]
+
 [observability]
 [observability.logs]
 enabled = true
